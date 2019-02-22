@@ -1,83 +1,106 @@
-import copy
 import numpy as np
 import matplotlib.pyplot as plt
+from utils import world_to_image, to_homo, to_non_homo, rc_to_uv, WALL, FREE, UNKNOWN
 
-UNKNOWN = 0
-WALL    = 2
-FREE    = 1
+
+
 
 class Map(object):
-    def __init__(self, xmin=-5, ymin=-15, xmax=15, ymax=10, res=0.05, figsize=(8, 8)):
+    def __init__(self, xmin=-5, ymin=-15, xmax=15, ymax=10, res=0.05, figsize=(16, 8)):
         self.xmin = xmin
         self.ymin = ymin
         self.xmax = xmax
         self.ymax = ymax
         self.res = res
-        self.map, self.log_odds = self._init_map_and_odds(xmin, ymin, xmax, ymax, res)
-        self.fig, self.ax = plt.subplots(figsize=figsize)
+        self.grid_map, self.log_odds, self.texture = self._init_maps(xmin, ymin, xmax, ymax, res)
+        _, (self.ax1, self.ax2) = plt.subplots(1, 2, figsize=figsize)
 
 
-    def update(self, lidar_coords, state):
+    def update_map(self, lidar_coords, T_wl):
 
+        # skip if no effect lidar scan points
         if lidar_coords.size == 0:
             return
 
-        # Mapping-b) transform points into world frame (Y_wo in pixels)
-        wpb = np.array([state[0]]).T
-        wRb = np.array([[np.cos(state[1]), -np.sin(state[1])],
-                        [np.sin(state[1]), np.cos(state[1])]])
-        bpl = np.array([[0, 0.015935]]).T
-        Y_wo = np.matmul(wRb, lidar_coords + bpl) + wpb
-        self._check_and_expand_map(Y_wo)
-        # transform into pixels
-        Y_wo = self._meter_to_pixel(Y_wo, self.xmin, self.ymax, self.res)
+        # Mapping-b) transform points into image frame (Y_io in image frame)
+        Y_wo = to_non_homo(np.matmul(T_wl, to_homo(lidar_coords)))
+        self._check_and_expand_maps(Y_wo)
+        Y_io = np.unique(world_to_image(Y_wo, self.xmin, self.ymax, self.res), axis=1)
 
-        # Mapping-c) Use bresenham2D to find free points (Y_wf in pixels)
-        Y_wf = np.empty((2,0))
-        wpb = self._meter_to_pixel(wpb, self.xmin, self.ymax, self.res)
-        for i in range(Y_wo.shape[1]):
-            Y_wf = np.hstack((Y_wf, self._bresenham2D(Y_wo[0, i], Y_wo[1, i], wpb[0], wpb[1])))
+        # Mapping-c) Use bresenham2D to find free points (Y_if in image frame)
+        Y_if = np.empty((2,0))
+        p_wb = T_wl[0:2, 2]
+        p_ib = world_to_image(p_wb, self.xmin, self.ymax, self.res)
+        for i in range(Y_io.shape[1]):
+            Y_if = np.hstack((Y_if, self._bresenham2D(Y_io[0, i], Y_io[1, i], p_ib[0], p_ib[1])))
         # remove overlapping points
-        Y_wf = np.unique(Y_wf, axis=1).astype(np.int_)
+        Y_if = np.unique(Y_if, axis=1).astype(int)
 
         # Mapping-d) increase/decrease log-odds
         trust = 0.8
         log_t = np.log(trust/(1 - trust))
-        self.log_odds[Y_wo[0], Y_wo[1]] = self.log_odds[Y_wo[0], Y_wo[1]] + log_t
-        self.log_odds[Y_wf[0], Y_wf[1]] = self.log_odds[Y_wf[0], Y_wf[1]] - log_t
-        self.map[self.log_odds < 0] = FREE
-        self.map[self.log_odds > 0] = WALL
+        # notice that occupied points are included in Y_if, so we add 2*log_t
+        self.log_odds[Y_io[0], Y_io[1]] = self.log_odds[Y_io[0], Y_io[1]] + 2*log_t
+        self.log_odds[Y_if[0], Y_if[1]] = self.log_odds[Y_if[0], Y_if[1]] - log_t
+        self.grid_map[self.log_odds < 0] = FREE
+        self.grid_map[self.log_odds > 0] = WALL
+
+
+    def update_texture(self, rgb, disp, K_oi, T_wo):
+        I, J = disp.shape
+        dd = -0.00304 * disp + 3.31
+        depth = 1.03 / dd
+        j, i = np.meshgrid(np.arange(J), np.arange(I))
+        # floor coords
+        Y_im = np.vstack([i.reshape(-1), j.reshape(-1)]).astype(int)
+        Y_o = np.matmul(K_oi, to_homo(rc_to_uv(Y_im, I))) * depth.reshape(-1)
+        Y_w = to_non_homo(np.matmul(T_wo, to_homo(Y_o)))
+
+        # floor thresholing
+        floor_index = np.abs(Y_w[2]) < 0.2
+        floor_w = Y_w[:2, floor_index]
+        if floor_w.size == 0:
+            return
+        floor_i, indices= np.unique(world_to_image(floor_w, self.xmin, self.ymax, self.res), axis=1, return_index=True)
+        floor_im = Y_im[:, floor_index][:, indices]
+
+
+        depth_i, depth_j = floor_im[0], floor_im[1]
+        rgb_i = np.round((depth_i * 526.37 - 7877.07 * dd[depth_i, depth_j] + 19276.0) / 585.051).astype(int)
+        rgb_j = np.round((depth_j * 526.37 + 16662.0) / 585.051).astype(int)
+        weight = self.texture[floor_i[0], floor_i[1], 3]
+        self.texture[floor_i[0], floor_i[1], :3] = ((self.texture[floor_i[0], floor_i[1], :3].T*weight +
+                                                    rgb[rgb_i, rgb_j].T)/(weight + 1)).T
+        self.texture[floor_i[0], floor_i[1], 3] += 1
 
 
     def show(self, time, trajectory, theta):
-        self.ax.clear()
-        self.ax.imshow(self.map, interpolation='none', extent=[self.xmin, self.xmax, self.ymin, self.ymax])
-        self.ax.plot(trajectory[0][:-1], trajectory[1][:-1], 'r.', markersize=3)
-        self.ax.plot(trajectory[0][-1], trajectory[1][-1], 'r', marker=(3, 0, theta/np.pi*180 - 90), markersize=5)
-        self.ax.set_title('Time: %.3f s' % time)
-        self.ax.set_xlabel('x / m')
-        self.ax.set_ylabel('y / m')
+        self.ax1.clear()
+        self.ax1.imshow(self.grid_map, interpolation='none', extent=[self.xmin, self.xmax, self.ymin, self.ymax])
+        self.ax1.plot(trajectory[0][:-1], trajectory[1][:-1], 'r.', markersize=3)
+        self.ax1.plot(trajectory[0][-1], trajectory[1][-1], 'r', marker=(3, 0, theta/np.pi*180 - 90), markersize=5)
+        self.ax1.set_title('Time: %.3f s' % time)
+        self.ax1.set_xlabel('x / m')
+        self.ax1.set_ylabel('y / m')
+        self.ax2.clear()
+        self.ax2.imshow(self.texture[:, :, :3], extent=[self.xmin, self.xmax, self.ymin, self.ymax])
+        self.ax2.plot(trajectory[0][-1], trajectory[1][-1], 'r', marker=(3, 0, theta/np.pi*180 - 90), markersize=5)
+        self.ax2.set_title('Texture mapping')
+
 
     @staticmethod
-    def show_particles(axe, particles):
+    def show_particles(ax, particles):
         for p in particles:
-            axe.plot(p.state[0][0], p.state[0][1], 'b.', markersize=2)
+            ax.plot(p.state[0][0], p.state[0][1], 'b.', markersize=2)
 
 
     @staticmethod
-    def _init_map_and_odds(xmin, ymin, xmax, ymax, res):
-        init_map = np.zeros((np.ceil((ymax - ymin)/res + 1).astype(np.int_),
-                             np.ceil((xmax - xmin)/res + 1).astype(np.int_))).astype(np.int_) * UNKNOWN
-        init_log_odds = np.zeros(np.shape(init_map))
-        return init_map, init_log_odds
-
-
-    @staticmethod
-    def _meter_to_pixel(coord, xmin, ymax, res):
-        # coord: size should be (2, *)
-        coord_col = np.ceil((coord[0] - xmin)/res)
-        coord_row = np.ceil((ymax- coord[1])/res)
-        return np.squeeze(np.vstack((coord_row, coord_col))).astype(np.int_)
+    def _init_maps(xmin, ymin, xmax, ymax, res):
+        init_grid_map = np.zeros((np.ceil((ymax - ymin)/res + 1).astype(np.int),
+                             np.ceil((xmax - xmin)/res + 1).astype(np.int))).astype(int) * UNKNOWN
+        init_log_odds = np.zeros(init_grid_map.shape)
+        init_texture = np.zeros(init_grid_map.shape + (4,))
+        return init_grid_map, init_log_odds, init_texture
 
 
     @staticmethod
@@ -124,38 +147,41 @@ class Map(object):
             else:
                 y = sy - np.cumsum(q)
         # remove start point
-        return np.vstack((x, y))[:, 1:]
+        return np.vstack((x, y))
 
 
-    def _check_and_expand_map(self, points):
+    def _check_and_expand_maps(self, coords):
         xmin_pre = self.xmin
         ymax_pre = self.ymax
         EXTEND = False
-        if (points[0] < self.xmin).any():
+        if (coords[0] < self.xmin).any():
             EXTEND = True
             xmin_pre = self.xmin
             self.xmin = xmin_pre * 2
-        elif (points[0] > self.xmax).any():
+        elif (coords[0] > self.xmax).any():
             EXTEND = True
             xmax_pre = self.xmax
             self.xmax = xmax_pre * 2
-        elif (points[1] < self.ymin).any():
+        elif (coords[1] < self.ymin).any():
             EXTEND = True
             ymin_pre = self.ymin
             self.ymin = ymin_pre * 2
-        elif (points[1] > self.ymax).any():
+        elif (coords[1] > self.ymax).any():
             EXTEND = True
             ymax_pre = self.ymax
             self.ymax = ymax_pre * 2
         if EXTEND:
-            map_pre = self.map
+            map_pre = self.grid_map
             log_odds_pre = self.log_odds
-            self.map, self.log_odds = self._init_map_and_odds(self.xmin, self.ymin, self.xmax, self.ymax, self.res)
+            texture_pre = self.texture
+            self.grid_map, self.log_odds, self.texture = self._init_maps(self.xmin, self.ymin, self.xmax,
+                                                                         self.ymax, self.res)
             # copy previous data into new ones
-            coord = self._meter_to_pixel(np.array([xmin_pre, ymax_pre]), self.xmin, self.ymax, self.res)
+            coord = world_to_image(np.array([xmin_pre, ymax_pre]), self.xmin, self.ymax, self.res)
             row_pre, col_pre = map_pre.shape
-            self.map[coord[0]:coord[0] + row_pre, coord[1]:coord[1] + col_pre] = map_pre
+            self.grid_map[coord[0]:coord[0] + row_pre, coord[1]:coord[1] + col_pre] = map_pre
             self.log_odds[coord[0]:coord[0] + row_pre, coord[1]:coord[1] + col_pre] = log_odds_pre
+            self.texture[coord[0]:coord[0] + row_pre, coord[1]:coord[1] + col_pre] = texture_pre
 
 
 
