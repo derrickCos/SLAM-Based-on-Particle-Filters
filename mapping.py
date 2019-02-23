@@ -5,16 +5,22 @@ from utils import world_to_image, to_homo, to_non_homo, rc_to_uv, WALL, FREE, UN
 
 
 class Map(object):
-    def __init__(self, xmin=-5, ymin=-15, xmax=15, ymax=10, res=0.05, figsize=(16, 8)):
+    def __init__(self, xmin=-5, ymin=-15, xmax=15, ymax=10, res=0.05, texture_on=False):
         self.xmin = xmin
         self.ymin = ymin
         self.xmax = xmax
         self.ymax = ymax
         self.res = res
-        self.log_odd_prior = 0
+        trust = 0.8
+        self.log_t = np.log(trust / (1 - trust))
+        self.log_odd_prior = -10*self.log_t
+        self.texture_on = texture_on
         self.grid_map, self.log_odds, self.texture = None, None, None
         self._init_maps()
-        _, (self.ax1, self.ax2) = plt.subplots(1, 2, figsize=figsize)
+        if self.texture_on:
+            _, (self.ax1, self.ax2) = plt.subplots(1, 2, figsize=(16, 8))
+        else:
+            _, self.ax1 = plt.subplots(1, 1, figsize=(8, 8))
 
 
     def update_map(self, lidar_coords, T_wl):
@@ -41,13 +47,12 @@ class Map(object):
         # Y_if = np.unique(Y_if, axis=1).astype(int)
 
         # Mapping-d) increase/decrease log-odds
-        trust = 0.8
-        log_t = np.log(trust/(1 - trust))
+
         # notice that occupied points are included in Y_if, so we add 2*log_t
-        self.log_odds[Y_io[0], Y_io[1]] = self.log_odds[Y_io[0], Y_io[1]] + 2*log_t
-        self.log_odds[Y_if[0], Y_if[1]] = self.log_odds[Y_if[0], Y_if[1]] - log_t
+        self.log_odds[Y_io[0], Y_io[1]] = self.log_odds[Y_io[0], Y_io[1]] + 2*self.log_t
+        self.log_odds[Y_if[0], Y_if[1]] = self.log_odds[Y_if[0], Y_if[1]] - self.log_t
+        self.grid_map[self.log_odds > 0] = WALL
         self.grid_map[self.log_odds < self.log_odd_prior] = FREE
-        self.grid_map[self.log_odds > self.log_odd_prior] = WALL
 
 
     def update_texture(self, rgb, disp, K_oi, T_wo, floor_threshold):
@@ -80,16 +85,18 @@ class Map(object):
 
     def show(self, time, trajectory, theta):
         self.ax1.clear()
-        self.ax1.imshow(self.grid_map, interpolation='none', extent=[self.xmin, self.xmax, self.ymin, self.ymax])
+        self.ax1.imshow(self.grid_map, interpolation='none', vmin=UNKNOWN, vmax=WALL,
+                        extent=[self.xmin, self.xmax, self.ymin, self.ymax])
         self.ax1.plot(trajectory[0][:-1], trajectory[1][:-1], 'r.', markersize=3)
         self.ax1.plot(trajectory[0][-1], trajectory[1][-1], 'r', marker=(3, 0, theta/np.pi*180 - 90), markersize=5)
         self.ax1.set_title('Time: %.3f s' % time)
         self.ax1.set_xlabel('x / m')
         self.ax1.set_ylabel('y / m')
-        self.ax2.clear()
-        self.ax2.imshow(self.texture[:, :, :3], extent=[self.xmin, self.xmax, self.ymin, self.ymax])
-        self.ax2.plot(trajectory[0][-1], trajectory[1][-1], 'r', marker=(3, 0, theta/np.pi*180 - 90), markersize=5)
-        self.ax2.set_title('Texture mapping')
+        if self.texture_on:
+            self.ax2.clear()
+            self.ax2.imshow(self.texture[:, :, :3], extent=[self.xmin, self.xmax, self.ymin, self.ymax])
+            self.ax2.plot(trajectory[0][-1], trajectory[1][-1], 'r', marker=(3, 0, theta/np.pi*180 - 90), markersize=5)
+            self.ax2.set_title('Texture mapping')
 
 
     @staticmethod
@@ -102,7 +109,7 @@ class Map(object):
         self.grid_map = np.zeros((np.ceil((self.ymax - self.ymin)/self.res + 1).astype(np.int),
                              np.ceil((self.xmax - self.xmin)/self.res + 1).astype(np.int))).astype(int) * UNKNOWN
         self.log_odds = np.zeros(self.grid_map.shape) + self.log_odd_prior
-        self.texture = np.zeros(self.grid_map.shape + (4,))
+        self.texture = np.zeros(self.grid_map.shape + (4,)) if self.texture_on else None
 
 
     @staticmethod
@@ -112,8 +119,6 @@ class Map(object):
         Inputs:
         (sx, sy)	start point of ray
         (ex, ey)	end point of ray
-        Return:
-            do no include the start point of ray
         '''
         sx = int(np.round(sx))
         sy = int(np.round(sy))
@@ -148,7 +153,6 @@ class Map(object):
                 y = sy + np.cumsum(q)
             else:
                 y = sy - np.cumsum(q)
-        # remove start point
         return np.vstack((x, y))
 
 
@@ -182,5 +186,6 @@ class Map(object):
             row_pre, col_pre = map_pre.shape
             self.grid_map[coord[0]:coord[0] + row_pre, coord[1]:coord[1] + col_pre] = map_pre
             self.log_odds[coord[0]:coord[0] + row_pre, coord[1]:coord[1] + col_pre] = log_odds_pre
-            self.texture[coord[0]:coord[0] + row_pre, coord[1]:coord[1] + col_pre] = texture_pre
+            if self.texture_on:
+                self.texture[coord[0]:coord[0] + row_pre, coord[1]:coord[1] + col_pre] = texture_pre
 

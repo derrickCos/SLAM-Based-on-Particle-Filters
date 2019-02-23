@@ -21,9 +21,10 @@ from robot import Robot
 
 parser = argparse.ArgumentParser(description='FastSLAM -- ECE 276A Project #2')
 parser.add_argument('-d', dest='dataset', type=int, default=20, help='dataset number')
-parser.add_argument('-t', dest='texture', type=bool, default=False, help='plot texture')
+parser.add_argument('-t', dest='texture_on', action='store_true', help='plot texture information')
 parser.add_argument('-N', dest='N_particles', type=int, default=100, help='number of particles')
-parser.add_argument('--no-noise', dest='no_noise', action='store_true', help='introduce no noise for motion predict')
+parser.add_argument('-n', dest='no_noise', action='store_true', help='introduce NO noise for motion predict')
+parser.add_argument('--sigma', dest='sigma', type=float, default=3, help='noisy level')
 parser.add_argument('-r', dest='resolution', type=float, default=0.1, help='map resolution')
 parser.add_argument('-f_i', dest='frame_interval', type=int, default=15, help='frame interval to save plots')
 parser.add_argument('-f_th', dest='floor_threshold', type=float, default=0.15, help='floor height threshold')
@@ -42,16 +43,16 @@ if __name__ == '__main__':
     if os.path.exists(save_dir):
         shutil.rmtree(save_dir)
     os.mkdir(save_dir)
-    data = load_and_process_data(dataset=dataset, texture=args.texture)
-    world = Map(-10, -10, 15, 15, res=args.resolution)
+    data = load_and_process_data(dataset=dataset, texture_on=args.texture_on)
+    world = Map(-10, -10, 15, 15, res=args.resolution, texture_on=args.texture_on)
     initial_state = ((0, 0), 0)
     N_particles = args.N_particles
     robot = Robot(initial_state, N_particles)
     # initialize map
     world.update_map(data['lidar_coords'][0], np.matmul(robot.T_wb, robot.T_bl))
 
-    for idx_t in tqdm.trange(1, len(data['stamps']), desc='Progress', unit='frame'):
-    # for idx_t in tqdm.trange(200, 1400):
+    # for idx_t in tqdm.trange(1, len(data['stamps']), desc='Progress', unit='frame'):
+    for idx_t in tqdm.trange(1000, 1400):
         # extract sensor data
         lidar_coords = data['lidar_coords'][idx_t]
         encoder_v = data['encoder_v'][idx_t]
@@ -59,8 +60,8 @@ if __name__ == '__main__':
         dt = data['dt'][idx_t]
 
         ### PREDICTION: use encoder and yaw info to update robot trajectory
-        robot.advance_by(encoder_v, imu_w, dt, noisy=not args.no_noise,
-                         nv=3*data['encoder_v_var'][idx_t], nw=3*data['imu_w_var'][idx_t])
+        robot.advance_by(encoder_v, imu_w, dt, noisy=not args.no_noise, nv=0.5, nw=0.5)
+                         # nv=args.sigma*data['encoder_v_var'][idx_t], nw=args.sigma*data['imu_w_var'][idx_t])
 
         ### UPDATE: update particle positions and weights using lidar scan
         robot.update_particles(lidar_coords, 2*(world.grid_map == WALL) - 1, world.res, world.xmin, world.ymax)
@@ -69,7 +70,7 @@ if __name__ == '__main__':
         ### MAPPING: update mapping based on current lidar scan
         world.update_map(lidar_coords, np.matmul(robot.T_wb, robot.T_bl))
 
-        if args.texture and data['rgb_update'][idx_t] and data['disp_update'][idx_t]:
+        if args.texture_on and data['rgb_update'][idx_t] and data['disp_update'][idx_t]:
             rgb = plt.imread(os.path.join(rgbd_dir, data['rgb_file_path'][idx_t]))
             disp = np.array(PIL.Image.open(os.path.join(rgbd_dir, data['disp_file_path'][idx_t])))
             yaw = robot.state[1]

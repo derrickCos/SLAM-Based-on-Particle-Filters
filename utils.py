@@ -78,7 +78,7 @@ def map_correlation(grid_map, res, Y_io, scan_range_xy, scan_range_w):
     return corr.max()
 
 
-def load_and_process_data(dataset, texture):
+def load_and_process_data(dataset, texture_on):
     ## Load dataset
     with np.load(os.path.join('data', 'Encoders%d.npz' % dataset)) as data:
         encoder_counts = data["counts"]         # 4 x n encoder counts
@@ -98,7 +98,7 @@ def load_and_process_data(dataset, texture):
         imu_linear_acceleration = data["linear_acceleration"]  # Accelerations in gs (gravity acceleration scaling)
         imu_stamps = data["time_stamps"]  # acquisition times of the imu measurements
 
-    if texture:
+    if texture_on:
         with np.load(os.path.join('data', 'Kinect%d.npz' % dataset)) as data:
             disp_stamps = data["disparity_time_stamps"]     # acquisition times of the disparity images
             rgb_stamps = data["rgb_time_stamps"]            # acquisition times of the rgb images
@@ -210,7 +210,7 @@ def load_and_process_data(dataset, texture):
         data['imu_w_var'][i] = np.var(data['imu_w'][max(0, i - 3) : min(len_stamps, i + 3)])
 
     # sync rgb
-    if texture:
+    if texture_on:
         rgb_stamps = rgb_stamps - data['t0']
         rgb_stamps = rgb_stamps[rgb_stamps >= 0]
         idx_t = 0
@@ -231,7 +231,7 @@ def load_and_process_data(dataset, texture):
                 break
 
     # sync disp
-    if texture:
+    if texture_on:
         disp_stamps = disp_stamps - data['t0']
         disp_stamps = disp_stamps[disp_stamps >= 0]
         idx_t = 0
@@ -254,7 +254,7 @@ def load_and_process_data(dataset, texture):
     return data
 
 
-def generate_video(png_dir):
+def generate_video(png_dir, format_list=['mp4', 'gif']):
     print('Generating video...')
     i = 0
     images = [[]] * 99999  # at most 99,999 frames
@@ -263,7 +263,8 @@ def generate_video(png_dir):
             file_path = os.path.join(png_dir, file_name)
             images[i] = imageio.imread(file_path)
             i += 1
-    imageio.mimsave(os.path.join(png_dir, 'result.mp4'), images[:i])
+    for file_format in format_list:
+        imageio.mimsave(os.path.join(png_dir, 'result.' + file_format), images[:i])
     print('Done.')
 
 
