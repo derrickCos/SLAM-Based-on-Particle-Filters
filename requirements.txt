@@ -1,6 +1,0 @@
-numpy
-imageio
-matplotlib
-tqdm
-imageio-ffmpeg
-scipy
