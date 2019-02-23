@@ -3,17 +3,82 @@ import imageio
 import numpy as np
 from scipy.signal import butter, lfilter
 
+
 # map label
 UNKNOWN = 0
 WALL    = 2
 FREE    = 1
 
-# noise level for different
-sigma_speed = 0.1
-sigma_yaw = 0.01
+
+def to_homo(coords):
+    # coords: size should be (x, *)
+    return np.vstack((coords, np.ones((1, coords.shape[1]))))
 
 
-def load_and_process_data(dataset, texture='on'):
+def to_non_homo(coords):
+    # coords: size should be (x + 1, *)
+    return coords[:-1] / coords[-1]
+
+
+def rc_to_uv(coords, rmax):
+    # coord: size should be (2, *)
+    # return np.vstack((coords[1], rmax - 1 - coords[0])).squeeze().astype(int)
+    return np.vstack((coords[1], coords[0])).squeeze().astype(int)
+
+
+def world_to_image(coords, xmin, ymax, res):
+    # coord: size should be (2, *)
+    # xmin, ymax, res: properties of grid_map
+    col = np.ceil((coords[0] - xmin)/res)
+    row = np.ceil((ymax- coords[1])/res)
+    return np.vstack((row, col)).squeeze().astype(int)
+
+
+# def map_correlation(grid_map, res, Y_io, scan_range_xy, scan_range_w):
+#     rdim, cdim = grid_map.shape
+#     n = np.ceil(scan_range_xy/res)
+#     r_scan = c_scan = np.arange(-n, n + 1).astype(int)
+#     n_r = r_scan.size
+#     n_c = c_scan.size
+#     corr = np.zeros((n_r, n_c))
+#     for ir in range(0, n_r):
+#         r = Y_io[0] + r_scan[ir]
+#         for ic in range(0, n_c):
+#             c = Y_io[1] + c_scan[ic]
+#             valid = np.logical_and(np.logical_and((r >= 0), (r < rdim)),
+#                                    np.logical_and((c >= 0), (c < cdim)))
+#             corr[ir, ic] = np.sum(grid_map[r[valid], c[valid]])
+#     return corr
+
+
+def map_correlation(grid_map, res, Y_io, scan_range_xy, scan_range_w):
+    grid_map[0, 0] = 0
+    rdim, cdim = grid_map.shape
+    n_xy = np.ceil(scan_range_xy/res)
+    w_res = 0.001
+    w_scan = np.arange(-scan_range_w, scan_range_w + w_res, w_res)
+    # w_scan = np.array([0])
+    corr = np.zeros(w_scan.size)
+    for i in range(w_scan.size):
+        w = w_scan[i]
+        R_w = np.array([[np.cos(w), -np.sin(w)],
+                        [np.sin(w), np.cos(w)]])
+        Y_io_w = np.round(np.matmul(R_w, Y_io)).astype(int)
+        r_scan = c_scan = np.arange(-n_xy, n_xy + 1).astype(int)
+        n_scan = r_scan.size * c_scan.size
+        Y_io_rep = np.repeat(Y_io_w[np.newaxis, :, :], n_scan, axis=0)
+        r_s, c_s = np.meshgrid(r_scan, c_scan)
+        scan = np.expand_dims(np.vstack((r_s.reshape(-1), c_s.reshape(-1))).T, axis=2)
+        Y_scan = Y_io_rep + scan
+        invalid = np.logical_or(np.logical_or(Y_scan[:, 0, :] < 0, Y_scan[:, 0, :] >= rdim),
+                                np.logical_or(Y_scan[:, 1, :] < 0, Y_scan[:, 1, :] >= cdim))
+        Y_scan[np.repeat(invalid[:, np.newaxis, :], 2, axis=1)] = 0
+        corr[i] = np.max(np.sum(grid_map[Y_scan[:, 0], Y_scan[:, 1]], axis=1))
+    # print(corr)
+    return corr.max()
+
+
+def load_and_process_data(dataset, texture):
     ## Load dataset
     with np.load(os.path.join('data', 'Encoders%d.npz' % dataset)) as data:
         encoder_counts = data["counts"]         # 4 x n encoder counts
@@ -33,11 +98,10 @@ def load_and_process_data(dataset, texture='on'):
         imu_linear_acceleration = data["linear_acceleration"]  # Accelerations in gs (gravity acceleration scaling)
         imu_stamps = data["time_stamps"]  # acquisition times of the imu measurements
 
-    if texture == 'on':
+    if texture:
         with np.load(os.path.join('data', 'Kinect%d.npz' % dataset)) as data:
             disp_stamps = data["disparity_time_stamps"]     # acquisition times of the disparity images
             rgb_stamps = data["rgb_time_stamps"]            # acquisition times of the rgb images
-
 
     ## Synchronize data
     reference_stamps = lidar_stamps     # use lidar_stamps as reference time
@@ -47,11 +111,13 @@ def load_and_process_data(dataset, texture='on'):
         't0': reference_stamps[0],
         'dt': np.zeros(np.size(reference_stamps)),
         'encoder_update': [False] * len_stamps,
-        'encoder_counts': np.zeros((len_stamps, 4)),
+        'encoder_v': np.zeros(len_stamps),
+        'encoder_v_var': np.zeros(len_stamps),
         'lidar_update': [False] * len_stamps,
         'lidar_coords': [[]] * len_stamps,
         'imu_update': [False] * len_stamps,
-        'imu_yaw': np.zeros(len_stamps),
+        'imu_w': np.zeros(len_stamps),
+        'imu_w_var': np.zeros(len_stamps),
         'rgb_update': [False] * len_stamps,
         'rgb_file_path': [[]] * len_stamps,
         'disp_update': [False] * len_stamps,
@@ -71,12 +137,20 @@ def load_and_process_data(dataset, texture='on'):
             idx_r = idx_r + 1
         if idx_r != idx_l:
             data['encoder_update'][idx_t] = True
-            data['encoder_counts'][idx_t] = np.mean(encoder_counts[:, idx_l:idx_r],axis=1)
+            encoder_count = np.mean(encoder_counts[:, idx_l:idx_r],axis=1)
+            fr, fl, rr, rl = encoder_count
+            s_r = (fr + rr) / 2 * 0.0022
+            s_l = (fl + rl) / 2 * 0.0022
+            v_r = s_r / data['dt'][idx_t]
+            v_l = s_l / data['dt'][idx_t]
+            data['encoder_v'][idx_t] = (v_r + v_l) / 2
             idx_l = idx_r
         idx_t = idx_t + 1
 
         if idx_r >= len(encoder_stamps) or idx_t >= len(data['stamps']):
             break
+    for i in range(len_stamps):
+        data['encoder_v_var'][i] = np.var(data['encoder_v'][max(0, i - 3) : min(len_stamps, i + 3)])
 
     # sync lidar
     lidar_stamps = lidar_stamps - data['t0']
@@ -109,16 +183,15 @@ def load_and_process_data(dataset, texture='on'):
     imu_stamps = imu_stamps - data['t0']
     imu_stamps = imu_stamps[imu_stamps >= 0]
     # lpf
-    def low_pass_filtering(data):
+    def low_pass_filtering(x, fs):
         cutoff = 10  # stop band: 10 Hz
-        fs = 1 / np.mean(imu_stamps[1:] - imu_stamps[:-1])  # sampling rate
         order = 10
         normal_cutoff = 2 * cutoff / fs
         b, a = butter(order, normal_cutoff)
-        return lfilter(b, a, imu_yaw)
+        return lfilter(b, a, x)
 
     imu_yaw = imu_angular_velocity[2]
-    imu_yaw_lp = low_pass_filtering(imu_yaw)
+    imu_yaw_lp = low_pass_filtering(imu_yaw, 1 / np.mean(imu_stamps[1:] - imu_stamps[:-1]))
     idx_t = 0
     idx_l = 0
     while True:
@@ -127,15 +200,17 @@ def load_and_process_data(dataset, texture='on'):
             idx_r = idx_r + 1
         if idx_r != idx_l:
             data['imu_update'][idx_t] = True
-            data['imu_yaw'][idx_t] = np.mean(imu_yaw_lp[idx_l:idx_r])
+            data['imu_w'][idx_t] = np.mean(imu_yaw_lp[idx_l:idx_r])
             idx_l = idx_r
         idx_t = idx_t + 1
 
         if idx_r >= len(imu_stamps) or idx_t >= len(data['stamps']):
             break
+    for i in range(len_stamps):
+        data['imu_w_var'][i] = np.var(data['imu_w'][max(0, i - 3) : min(len_stamps, i + 3)])
 
     # sync rgb
-    if texture == 'on':
+    if texture:
         rgb_stamps = rgb_stamps - data['t0']
         rgb_stamps = rgb_stamps[rgb_stamps >= 0]
         idx_t = 0
@@ -156,7 +231,7 @@ def load_and_process_data(dataset, texture='on'):
                 break
 
     # sync disp
-    if texture == 'on':
+    if texture:
         disp_stamps = disp_stamps - data['t0']
         disp_stamps = disp_stamps[disp_stamps >= 0]
         idx_t = 0
@@ -177,52 +252,6 @@ def load_and_process_data(dataset, texture='on'):
                 break
 
     return data
-
-
-def add_noise(coords, sigma):
-    return coords + sigma*np.random.uniform(-1, 1, *np.shape(coords))
-
-
-def to_homo(coords):
-    # coords: size should be (x, *)
-    return np.vstack((coords, np.ones((1, coords.shape[1]))))
-
-
-def to_non_homo(coords):
-    # coords: size should be (x + 1, *)
-    return coords[:-1] / coords[-1]
-
-
-def rc_to_uv(coords, rmax):
-    # coord: size should be (2, *)
-    # return np.vstack((coords[1], rmax - 1 - coords[0])).squeeze().astype(int)
-    return np.vstack((coords[1], coords[0])).squeeze().astype(int)
-
-
-def world_to_image(coords, xmin, ymax, res):
-    # coord: size should be (2, *)
-    # xmin, ymax, res: properties of grid_map
-    col = np.ceil((coords[0] - xmin)/res)
-    row = np.ceil((ymax- coords[1])/res)
-    return np.vstack((row, col)).squeeze().astype(int)
-
-
-def map_correlation(grid_map, res, Y_io, scan_range):
-    xdim = grid_map.shape[0]
-    ydim = grid_map.shape[1]
-    n = np.ceil(scan_range/res)
-    x_scan = y_scan = np.arange(-n, n + 1).astype(int)
-    n_xs = x_scan.size
-    n_ys = y_scan.size
-    corr = np.zeros((n_xs, n_ys))
-    for jy in range(0, n_ys):
-        iy = Y_io[1, :] + y_scan[jy]
-        for jx in range(0, n_xs):
-            ix = Y_io[0, :] + x_scan[jx]
-            valid = np.logical_and(np.logical_and((iy >= 0), (iy < ydim)),
-                                   np.logical_and((ix >= 0), (ix < xdim)))
-            corr[jx, jy] = np.sum(grid_map[ix[valid], iy[valid]])
-    return corr
 
 
 def generate_video(png_dir):

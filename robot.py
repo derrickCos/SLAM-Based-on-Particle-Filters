@@ -3,6 +3,7 @@ import numpy as np
 from utils import *
 
 
+
 class Robot(object):
     def __init__(self, state, N):
         ## Particles
@@ -49,14 +50,14 @@ class Robot(object):
         self._update_state()
 
 
-    def advance_by(self, encoder_counts, yaw, dt, noisy=False):
+    def advance_by(self, encoder_counts, yaw, dt, noisy=False, nv=0, nw=0):
         for i in range(self.N - 1):
-            self.particles[i].advance_by(encoder_counts, yaw, dt, noisy=noisy)
+            self.particles[i].advance_by(encoder_counts, yaw, dt, noisy=noisy, nv=nv, nw=nw)
         self.particles[-1].advance_by(encoder_counts, yaw, dt)
 
 
     def update_particles(self, lidar_coords, grid_map, res, xmin, ymax):
-        grid_map = 2 * (grid_map == WALL) - 1      # convert to {-1, 1}
+        # grid_map = 2 * (grid_map == WALL) - 1      # convert to {-1, 1}
         new_weights = np.zeros(self.N)
         for i in range(self.N):
             p_wb = np.array(self.particles[i].state[0])
@@ -65,9 +66,11 @@ class Robot(object):
             self.T_wb = np.vstack((np.hstack((R_wb, p_wb.reshape(2, 1))), np.array([[0, 0, 1]])))
             T_wl = np.matmul(self.T_wb, self.T_bl)
             Y_wo = to_non_homo(np.matmul(T_wl, to_homo(lidar_coords)))
-            self.particles[i].Y_io = np.unique(np.hstack((self.particles[i].Y_io,
-                                                          world_to_image(Y_wo, xmin, ymax, res))), axis=1).astype(int)
-            new_weights[i] = np.max(map_correlation(grid_map, res, self.particles[i].Y_io, scan_range=0.2))
+            self.particles[i].Y_io = np.hstack((self.particles[i].Y_io,
+                                                world_to_image(Y_wo, xmin, ymax, res))).astype(int)
+            self.particles[i].Y_io = np.unique(self.particles[i].Y_io, axis=1)
+            new_weights[i] = np.max(map_correlation(grid_map, res, self.particles[i].Y_io,
+                                                    scan_range_xy=0.2, scan_range_w=0.005))
         new_weights = new_weights - np.max(new_weights) + 50    # avoid overflow
         new_weights = np.exp(new_weights)/np.sum(np.exp(new_weights))
         for i in range(self.N):
@@ -117,18 +120,12 @@ class Particle(object):
             return [cls(state, Y_io) for _ in range(0, count)]
 
 
-    def advance_by(self, encoder_counts, yaw, dt, noisy=False):
+    def advance_by(self, v, w, dt, noisy=False, nv=0, nw=0):
         (x0, y0), theta0 = self.state
-        fr, fl, rr, rl = encoder_counts
-        s_r = (fr + rr) / 2 * 0.0022
-        s_l = (fl + rl) / 2 * 0.0022
-        v_r = s_r / dt
-        v_l = s_l / dt
-        v = (v_r + v_l) / 2
         if noisy:
-            v = add_noise(v, sigma_speed)
-            yaw = add_noise(yaw, sigma_yaw)
-        dtheta = yaw * dt
+            v += nv*np.random.randn(*np.shape(v))
+            w += nw*np.random.randn(*np.shape(w))
+        dtheta = w * dt
         theta = theta0 + dtheta
         x = x0 + v*dt*np.sinc(dtheta/2/np.pi)*np.cos(theta)
         y = y0 + v*dt*np.sinc(dtheta/2/np.pi)*np.sin(theta)
