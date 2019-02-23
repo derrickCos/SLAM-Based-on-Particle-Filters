@@ -3,4 +3,8 @@ imageio
 matplotlib
 tqdm
 imageio-ffmpeg
+<<<<<<< Updated upstream
 scipy
+=======
+scipy
+>>>>>>> Stashed changes
