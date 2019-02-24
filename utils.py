@@ -55,9 +55,9 @@ def map_correlation(grid_map, res, Y_io, scan_range_xy, scan_range_w):
     grid_map[0, 0] = 0
     rdim, cdim = grid_map.shape
     n_xy = np.ceil(scan_range_xy/res)
-    w_res = 0.001
-    w_scan = np.arange(-scan_range_w, scan_range_w + w_res, w_res)
-    # w_scan = np.array([0])
+    # w_res = 0.001
+    # w_scan = np.arange(-scan_range_w, scan_range_w + w_res, w_res)
+    w_scan = np.array([0])
     corr = np.zeros(w_scan.size)
     for i in range(w_scan.size):
         w = w_scan[i]

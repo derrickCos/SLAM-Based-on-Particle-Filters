@@ -52,8 +52,8 @@ if __name__ == '__main__':
     # initialize map
     world.update_map(data['lidar_coords'][0], np.matmul(robot.T_wb, robot.T_bl))
 
-    # for idx_t in tqdm.trange(1, len(data['stamps']), desc='Progress', unit='frame'):
-    for idx_t in tqdm.trange(1000, 1100):
+    for idx_t in tqdm.trange(1, len(data['stamps']), desc='Progress', unit='frame'):
+    # for idx_t in tqdm.trange(1000, 1100):
         # extract sensor data
         lidar_coords = data['lidar_coords'][idx_t]
         encoder_v = data['encoder_v'][idx_t]
