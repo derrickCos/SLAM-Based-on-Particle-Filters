@@ -47,5 +47,5 @@ python main.py -d 20 -t
 
 ![result of dataset 20 with texture](https://github.com/PenroseWang/SLAM-based-on-particle-filter/blob/master/results/20_with_texture/result.gif)
 
-![result of dataset 21 with texture](https://github.com/PenroseWang/SLAM-based-on-particle-filter/blob/master/results/201_with_texture/result.gif)
+![result of dataset 21 with texture](https://github.com/PenroseWang/SLAM-based-on-particle-filter/blob/master/results/21_with_texture/result.gif)
 
