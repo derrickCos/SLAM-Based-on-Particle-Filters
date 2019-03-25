@@ -59,3 +59,7 @@ Dataset 21 with texture:
 
 <img src="results/21_texture.gif" style="height:80%;width:80%;" />
 
+Dataset 20 without noise:
+
+<img src="results/20_no_noise.gif" style="height:50%;width:50%;" />
+
