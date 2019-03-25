@@ -39,7 +39,7 @@ python main.py -d 20 -t
 
 ### Results
 
-<img src="results/20.gif" style="height:500px;" />
+<img src="results/20.gif" style="height:70%;width:70%;" />
 
 ![result of dataset 21 without texture](https://github.com/PenroseWang/SLAM-based-on-particle-filter/blob/master/results/21/result.gif)
 
