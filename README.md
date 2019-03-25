@@ -39,13 +39,23 @@ python main.py -d 20 -t
 
 ### Results
 
-<img src="results/20.gif" style="height:70%;width:70%;" />
+Dataset 20:
 
-![result of dataset 21 without texture](https://github.com/PenroseWang/SLAM-based-on-particle-filter/blob/master/results/21/result.gif)
+<img src="results/20.gif" style="height:50%;width:50%;" />
 
-![result of dataset 23 without texture](https://github.com/PenroseWang/SLAM-based-on-particle-filter/blob/master/results/23/result.gif)
+Dataset 21:
 
-![result of dataset 20 with texture](https://github.com/PenroseWang/SLAM-based-on-particle-filter/blob/master/results/20_with_texture/result.gif)
+<img src="results/21.gif" style="height:50%;width:50%;" />
 
-![result of dataset 21 with texture](https://github.com/PenroseWang/SLAM-based-on-particle-filter/blob/master/results/21_with_texture/result.gif)
+Dataset 23:
+
+<img src="results/23.gif" style="height:50%;width:50%;" />
+
+Dataset 20 with texture:
+
+<img src="results/20_texture.gif" style="height:80%;width:80%;" />
+
+Dataset 21 with texture:
+
+<img src="results/21_texture.gif" style="height:80%;width:80%;" />
 
