@@ -17,13 +17,12 @@ from utils import check_and_rename, load_and_process_data, generate_video, WALL
 from mapping import Map
 from robot import Robot
 
-
 parser = argparse.ArgumentParser(description='FastSLAM -- ECE 276A Project #2')
 parser.add_argument('-d', dest='dataset', type=int, default=20, help='dataset number')
 parser.add_argument('-t', dest='texture_on', action='store_true', help='plot texture information')
 parser.add_argument('-N', dest='N_particles', type=int, default=100, help='number of particles')
 parser.add_argument('-n', dest='no_noise', action='store_true', help='introduce NO noise for motion predict')
-parser.add_argument('--sigma', dest='sigma', type=float, default=3, help='noisy level')
+parser.add_argument('--sigma', dest='sigma', type=float, default=0.5, help='noisy level')
 parser.add_argument('-r', dest='resolution', type=float, default=0.1, help='map resolution')
 parser.add_argument('-f_i', dest='frame_interval', type=int, default=15, help='frame interval to save plots')
 parser.add_argument('-f_th', dest='floor_threshold', type=float, default=0.15, help='floor height threshold')
@@ -33,18 +32,17 @@ parser.add_argument('-f_th', dest='floor_threshold', type=float, default=0.15, h
 if __name__ == '__main__':
     args = parser.parse_args()
     print('Configuration:')
-    print(args)
+    print('    ', args)
 
     ### Load data and create world & robot
-    dataset = args.dataset
     rgbd_dir = os.path.join('data', 'dataRGBD')
     result_dir = 'results'
     if not os.path.exists(result_dir):
         os.mkdir(result_dir)
-    save_dir = os.path.join(result_dir, str(dataset))
-    save_dir = check_and_rename(save_dir)
-    os.mkdir(save_dir)
-    data = load_and_process_data(dataset=dataset, texture_on=args.texture_on)
+    plots_save_path = os.path.join(result_dir, str(args.dataset))
+    plots_save_path = check_and_rename(plots_save_path)
+    os.mkdir(plots_save_path)
+    data = load_and_process_data(dataset=args.dataset, texture_on=args.texture_on)
     world = Map(-10, -10, 15, 15, res=args.resolution, texture_on=args.texture_on)
     initial_state = ((0, 0), 0)
     N_particles = args.N_particles
@@ -53,7 +51,7 @@ if __name__ == '__main__':
     world.update_map(data['lidar_coords'][0], np.matmul(robot.T_wb, robot.T_bl))
 
     for idx_t in tqdm.trange(1, len(data['stamps']), desc='Progress', unit='frame'):
-    # for idx_t in tqdm.trange(1000, 1100):
+    # for idx_t in tqdm.trange(1000, 1050):
         # extract sensor data
         lidar_coords = data['lidar_coords'][idx_t]
         encoder_v = data['encoder_v'][idx_t]
@@ -61,12 +59,10 @@ if __name__ == '__main__':
         dt = data['dt'][idx_t]
 
         ### PREDICTION: use encoder and yaw info to update robot trajectory
-        robot.advance_by(encoder_v, imu_w, dt, noisy=not args.no_noise, nv=0.5, nw=0.5)
-                         # nv=args.sigma*data['encoder_v_var'][idx_t], nw=args.sigma*data['imu_w_var'][idx_t])
+        robot.advance_by(encoder_v, imu_w, dt, noisy=not args.no_noise, nv=args.sigma, nw=args.sigma)
 
         ### UPDATE: update particle positions and weights using lidar scan
         robot.update_particles(lidar_coords, 2*(world.grid_map == WALL) - 1, world.res, world.xmin, world.ymax)
-        # robot.update_particles(lidar_coords, world.log_odds, world.res, world.xmin, world.ymax)
 
         ### MAPPING: update mapping based on current lidar scan
         world.update_map(lidar_coords, np.matmul(robot.T_wb, robot.T_bl))
@@ -86,10 +82,19 @@ if __name__ == '__main__':
         if idx_t % args.frame_interval == 0:
             # display every 15 frames
             world.show(data['stamps'][idx_t], robot.trajectory, robot.state[1])
-            world.show_particles(world.ax1, robot.particles)
+            # world.show_particles(world.ax1, robot.particles)
             # plt.pause(1e-20)    # commented for faster iteration without displaying plot
-            plt.savefig(os.path.join(save_dir, 'result%05d.png' % idx_t), dpi=150)
+            plt.savefig(os.path.join(plots_save_path, 'result%05d.png' % idx_t), dpi=150)
 
+    result_save_path = os.path.join(result_dir, str(args.dataset))
+    if args.no_noise:
+        result_save_path += '_no_noise'
+    if args.texture_on:
+        result_save_path += '_texture'
 
-    generate_video(save_dir)
+    result_save_path = check_and_rename(result_save_path, format='.gif')
+    generate_video(plots_save_path, result_save_path)
+
     plt.show()  # if commented, main script will exit without displaying the final result
+
+

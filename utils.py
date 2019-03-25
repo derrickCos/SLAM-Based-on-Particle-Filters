@@ -51,30 +51,20 @@ def world_to_image(coords, xmin, ymax, res):
 #     return corr
 
 
-def map_correlation(grid_map, res, Y_io, scan_range_xy, scan_range_w):
+def map_correlation(grid_map, res, Y_io, scan_range_xy):
     grid_map[0, 0] = 0
     rdim, cdim = grid_map.shape
     n_xy = np.ceil(scan_range_xy/res)
-    # w_res = 0.001
-    # w_scan = np.arange(-scan_range_w, scan_range_w + w_res, w_res)
-    w_scan = np.array([0])
-    corr = np.zeros(w_scan.size)
-    for i in range(w_scan.size):
-        w = w_scan[i]
-        R_w = np.array([[np.cos(w), -np.sin(w)],
-                        [np.sin(w), np.cos(w)]])
-        Y_io_w = np.round(np.matmul(R_w, Y_io)).astype(int)
-        r_scan = c_scan = np.arange(-n_xy, n_xy + 1).astype(int)
-        n_scan = r_scan.size * c_scan.size
-        Y_io_rep = np.repeat(Y_io_w[np.newaxis, :, :], n_scan, axis=0)
-        r_s, c_s = np.meshgrid(r_scan, c_scan)
-        scan = np.expand_dims(np.vstack((r_s.reshape(-1), c_s.reshape(-1))).T, axis=2)
-        Y_scan = Y_io_rep + scan
-        invalid = np.logical_or(np.logical_or(Y_scan[:, 0, :] < 0, Y_scan[:, 0, :] >= rdim),
-                                np.logical_or(Y_scan[:, 1, :] < 0, Y_scan[:, 1, :] >= cdim))
-        Y_scan[np.repeat(invalid[:, np.newaxis, :], 2, axis=1)] = 0
-        corr[i] = np.max(np.sum(grid_map[Y_scan[:, 0], Y_scan[:, 1]], axis=1))
-    # print(corr)
+    r_scan = c_scan = np.arange(-n_xy, n_xy + 1).astype(int)
+    n_scan = r_scan.size * c_scan.size
+    Y_io_rep = np.repeat(Y_io[np.newaxis, :, :], n_scan, axis=0)
+    r_s, c_s = np.meshgrid(r_scan, c_scan)
+    scan = np.expand_dims(np.vstack((r_s.reshape(-1), c_s.reshape(-1))).T, axis=2)
+    Y_scan = Y_io_rep + scan
+    invalid = np.logical_or(np.logical_or(Y_scan[:, 0, :] < 0, Y_scan[:, 0, :] >= rdim),
+                            np.logical_or(Y_scan[:, 1, :] < 0, Y_scan[:, 1, :] >= cdim))
+    Y_scan[np.repeat(invalid[:, np.newaxis, :], 2, axis=1)] = 0
+    corr = np.max(np.sum(grid_map[Y_scan[:, 0], Y_scan[:, 1]], axis=1))
     return corr.max()
 
 
@@ -244,7 +234,8 @@ def load_and_process_data(dataset, texture_on):
             if idx_r != idx_l:
                 data['disp_update'][idx_t] = True
                 cnt = cnt + 1
-                data['disp_file_path'][idx_t] = os.path.join('Disparity%d' % dataset, 'disparity%d_%d.png' % (dataset, cnt))
+                data['disp_file_path'][idx_t] = os.path.join('Disparity%d' % dataset, 'disparity%d_%d.png'
+                                                             % (dataset, cnt))
                 idx_l = idx_r
             idx_t = idx_t + 1
 
@@ -254,29 +245,29 @@ def load_and_process_data(dataset, texture_on):
     return data
 
 
-def check_and_rename(save_dir):
-    if os.path.exists(save_dir):
+def check_and_rename(path, format=''):
+    if os.path.exists(path + format):
         i = 1
-        while os.path.exists(save_dir + '_' + str(i)):
+        while os.path.exists(path + '_' + str(i) + format):
             i += 1
-        return save_dir + '_' + str(i)
+        return path + '_' + str(i) + format
     else:
-        return save_dir
+        return path + format
 
 
-
-def generate_video(save_dir, format_list=['mp4', 'gif']):
+def generate_video(plots_path, save_path):
     print('Generating video...')
     i = 0
     images = [[]] * 99999  # at most 99,999 frames
-    for file_name in sorted(os.listdir(save_dir)):
+    for file_name in sorted(os.listdir(plots_path)):
         if file_name.endswith('.png'):
-            file_path = os.path.join(save_dir, file_name)
+            file_path = os.path.join(plots_path, file_name)
             images[i] = imageio.imread(file_path)
+            os.remove(os.path.join(plots_path, file_name))
             i += 1
-    for file_format in format_list:
-        imageio.mimsave(os.path.join(save_dir, 'result.' + file_format), images[:i])
-    print('Done. Video has been save to \'' + save_dir + '\'.')
+    os.rmdir(plots_path)
+    imageio.mimsave(save_path, images[:i])
+    print('Video has been save to \'' + save_path + '\'. Done. ')
 
 
 
