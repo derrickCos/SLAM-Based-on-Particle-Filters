@@ -7,11 +7,11 @@ University of California, San Diego, 2019
 ## Content
 
 - [Overview](#overview)
-- [Requirements & Installation](#requirements-&-installation)
+- [Requirements & Installation](#requirements--installation)
 - [Demo](#demo)
 - [Results](#results)
 
-##Overview
+## Overview
 
 Implement simultaneous localization and mapping (SLAM) using odometry, inertial, 2-D laser range, and RGBD measurements from a differential-drive robot. IMU, odometry, and laser measurements have been used to localize the robot and build a 2-D occupancy grid map of the environment. RGBD information is used to map the texture onto the floor of the 2-D map.
 
@@ -43,7 +43,7 @@ pip install -U pip
 pip install -r requirements.txt
 ```
 
-##Demo
+## Demo
 
 Run
 
