@@ -17,15 +17,15 @@ from utils import check_and_rename, load_and_process_data, generate_video, WALL
 from mapping import Map
 from robot import Robot
 
-parser = argparse.ArgumentParser(description='FastSLAM -- ECE 276A Project #2')
-parser.add_argument('-d', dest='dataset', type=int, default=20, help='dataset number')
-parser.add_argument('-t', dest='texture_on', action='store_true', help='plot texture information')
-parser.add_argument('-N', dest='N_particles', type=int, default=100, help='number of particles')
+parser = argparse.ArgumentParser(description='SLAM Based on Particle Filters')
+parser.add_argument('-d', dest='dataset', type=int, default=20, help='dataset number, default 20')
+parser.add_argument('-t', dest='texture_on', action='store_true', help='plot texture information, default False')
+parser.add_argument('-N', dest='N_particles', type=int, default=100, help='number of particles, default 100')
 parser.add_argument('-n', dest='no_noise', action='store_true', help='introduce NO noise for motion predict')
-parser.add_argument('--sigma', dest='sigma', type=float, default=0.5, help='noisy level')
-parser.add_argument('-r', dest='resolution', type=float, default=0.1, help='map resolution')
-parser.add_argument('-f_i', dest='frame_interval', type=int, default=15, help='frame interval to save plots')
-parser.add_argument('-f_th', dest='floor_threshold', type=float, default=0.15, help='floor height threshold')
+parser.add_argument('--sigma', dest='sigma', type=float, default=0.5, help='noisy level, default 0.5')
+parser.add_argument('-r', dest='resolution', type=float, default=0.1, help='map resolution, default 0.1')
+parser.add_argument('-f_i', dest='frame_interval', type=int, default=15, help='frame interval to save plots, default 15')
+parser.add_argument('-f_th', dest='floor_threshold', type=float, default=0.15, help='floor height threshold, default 0.15')
 
 
 
