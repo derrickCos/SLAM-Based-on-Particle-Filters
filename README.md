@@ -6,10 +6,10 @@ University of California, San Diego, 2019
 
 ## Content
 
-- [Overview](# overview)
-- [Requirements & Installation](# requirements-&-installation)
-- [Demo](# demo)
-- [Results](# results)
+- [Overview](#overview)
+- [Requirements & Installation](#requirements-&-installation)
+- [Demo](#demo)
+- [Results](#results)
 
 ##Overview
 
